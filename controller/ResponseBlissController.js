@@ -1,0 +1,224 @@
+'use strict';
+
+/**
+ * 
+ * Controllers for Handling Bliss Responding Operations for Responders (Celebs)
+ * 
+ * @param {AWS-SDK Object} DynamoDBClient AWS SDK Object, containing the DynamoDB CLient Object
+ * @param {AWS-SDK Object} S3Client AWS SDK Object, containing the S3 CLient Object
+ * @param {AWS-SDK Object} SNSClient AWS SDK Object, containing the SNS CLient Object
+ * 
+ */
+module.exports = (DynamoDBClient, S3Client, SNSClient) => {
+    
+    //Importing Modules
+    const cloudFrontPrivate = require('../private/cloudfront_private.pem');
+    const cloudFrontAccessID = require('../private/cloudfront.accessid.json').ACCESSID;
+
+    //Initializing Variables
+    const blissResponseBucket = process.env.BLISS_RESPONSE_BUCKET;
+    const blissResponseOutputBucket = process.env.BLISS_RESPONSE_OUTPUT_BUCKET;
+    const blissResponseSNS = process.env.BLISS_RESPONSE_SNS_ARN;
+    const blissResponseDBTableName = process.env.BLISS_RESPONSE_DB_TABLE;
+    const blissResponseCDNUrl = process.env.BLISS_RESPONSE_CDN_URL;
+    
+
+    /**
+     * 
+     * Get The Current Time, derive the Bliss Request Id and Expire Time from it. Currently,
+     * expire time is 1 hour. In production env, it must be 7 days
+     * 
+     */
+    const getBlissResponseIdandExpireTime = () => {
+        const currTime = Date.now() / 1000;
+        const normalizingTime = 880831800;
+        const expireTime = currTime + (60 * 60);
+        const blissResponseId = currTime - normalizingTime;
+
+        return {
+            blissResponseId,
+            expireTime
+        };
+    };
+
+    /**
+     * 
+     * Upload Bliss Video as Response to the Bliss request, in the S3 Bucket
+     * 
+     * @param {number} blissResponseId Bliss Response Id
+     * @param {object} blissStream Read Stream of the Videos for Responding to the bliss requests
+     * @param {string} blissMIMEType MIME type of the bliss response video
+     * 
+     */
+    const uploadBlissResponseVideo = async (blissResponseId, blissStream, blissMIMEType) => {
+        const blissParam = { 
+            Bucket: blissResponseBucket,
+            Key: blissResponseId,
+            Body: blissStream,
+            ContentType: blissMIMEType
+        };
+
+        const s3UploadPromise = S3Client.upload(blissParam).promise();
+
+        return s3UploadPromise.then(() => { return true });
+    };
+
+    /**
+     * 
+     * Upload Bliss Response as Response to the Bliss request, in the S3 Bucket
+     * 
+     * @param {number} blissResponseId Bliss Response Id
+     * @param {string} blissRequester client_id, representing the client requesting for a bliss
+     * @param {string} blissResponder celeb_name, representing the celeb responding to a bliss request
+     * @param {int} expireTime TTL for the data stored in the Database
+     * 
+     */
+    const uploadBlissResponseData = async (blissResponseId, blissRequester, blissResponder, expireTime) => {
+        return new Promise((resolve, reject) => {
+            try {
+                const dynamoDBPayload = {
+                    TableName: blissResponseDBTableName,
+                    Item: {
+                        BLISS_ID: { N: blissResponseId },
+                        BLISS_REQUESTER: { S: blissRequester },
+                        BLISS_RESPONDER: { S: blissResponder },
+                        EXPIRE_TIME: {N: expireTime}
+                    }
+                };
+
+                DynamoDBClient.putItem(dynamoDBPayload, (err, data) => {
+                    if(err) 
+                        return reject(err);
+                    else
+                        return resolve(blissResponseId);
+                })
+            }
+            catch(err) {
+                return reject(err);
+            }
+        })
+    }
+
+    /**
+     * 
+     * Get Bliss Response from the Celeb (Responder) with the blissResponseId Attribute
+     * 
+     * @param {number} blissResponseId Bliss Response Id
+     * 
+     */
+    const getBlissResponseDownloadURL = (blissResponseId) => {
+        const cloudfrontAccessKeyId = cloudFrontAccessID;
+        const cloudFrontPrivateKey = cloudFrontPrivate;
+
+        const signer = new AWS.CloudFront.Signer(cloudfrontAccessKeyId, cloudFrontPrivateKey)
+
+        const expire = 60 * 60 * 1000;
+
+        const signedUrl = signer.getSignedUrl({
+        url: `${blissResponseCDNUrl}/${blissResponseId}`,
+            expires: Math.floor((Date.now() + expire)/1000), // Unix UTC timestamp for next one hour
+        });
+
+        return {signedUrl, expireTime};
+    }
+
+    /**
+     * 
+     * Send Notification to the SNS about the Response being uploaded, which will further
+     * invoke function in the Notification Service to send the Notification to the Client
+     * App using Firebase Cloud Messaging.
+     * 
+     * @param {number} blissResponseId Bliss Response Id
+     * @param {string} blissRequester client_id, representing the client requesting for a bliss
+     * @param {string} blissResponder celeb_name, representing the celeb responding to a bliss request
+     * 
+     */
+    const sendBlissResponseNotification = async (blissResponseId, blissRequester, blissResponder) => {
+        const snsMessage = {
+            BLISS_ID: blissResponseId,
+            BLISS_REQUESTER: blissRequester,
+            BLISS_RESPONDER: blissResponder,
+            Message: 'BLISS MESSAGE UPLOADED'
+        };
+
+        const notification = {
+            Message: JSON.stringify(snsMessage),
+            TopicArn: blissResponseSNS
+        };
+
+        const snsClientPromise = SNSClient.publish(notification).promise();
+        
+        return snsClientPromise
+            .then((data) => {
+                console.log(chalk.success(`Bliss Uploaded Successfully. Message ID: ${data.MessageId}`));
+                return [null, true];
+            })
+            .catch((err) => {
+                console.error(chalk.error(`ERR: ${err.message}`));
+                return [err, false];
+            })
+    }
+
+    /**
+     * 
+     * Transmux/Transcode the Bliss Response Video using MediaConverter and then push the Video
+     * Channels in the S3Output Bucket, which will further send the video to the CDN.
+     * 
+     * @param {number} blissResponseId Bliss Response Id
+     * @param {object} blissStream Read Stream of the Videos for Responding to the bliss requests
+     * @param {string} blissMIMEType MIME type of the bliss response video
+     * 
+     */
+    const transmuxBlissResponseVideo = async (blissResponseId, blissStream, blissMIMEType) => {
+        const blissParam = { 
+            Bucket: blissResponseOutputBucket,
+            Key: blissResponseId,
+            Body: blissStream,
+            ContentType: blissMIMEType
+        };
+
+        const s3UploadPromise = S3Client.upload(blissParam).promise();
+
+        return s3UploadPromise.then(() => { return true });
+    };
+
+    /**
+     * 
+     * Check if the Bliss Response Video has been Uploaded yet.
+     * 
+     * @param {number} blissResponseId Bliss Response Id
+     * 
+     */
+    const checkResponseVideoExists = async (blissResponseId) => {
+        return new Promise((resolve, reject) => {
+            try {
+                const videoParam = {
+                    Bucket: blissResponseOutputBucket,
+                    Key: blissResponseId
+                };
+                
+                S3Client.headObject(videoParam, (err, metadate) => {
+                    if(err && err.statusCode === 404) {
+                        return resolve(false);
+                    } else if(err) {
+                        return reject(err);
+                    }else {
+                        return resolve(true);
+                    }
+                });
+            } catch(err) {
+                return reject(err);
+            };
+        })
+    };
+
+    return {
+        getBlissResponseIdandExpireTime,
+        sendBlissResponseNotification,
+        transmuxBlissResponseVideo,
+        uploadBlissResponseData,
+        uploadBlissResponseVideo,
+        checkResponseVideoExists,
+        getBlissResponseDownloadURL
+    };
+}
