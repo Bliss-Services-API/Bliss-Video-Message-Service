@@ -255,7 +255,6 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
         uploadBlissVideoRequestData,
         uploadBlissVideoRequest,
         getBlissRequestVideoDownloadURL,
-        getBlissRequestVideoData,
         getBlissRequestData,
         uploadBlissRequestData,
         checkRequestVideoExists

@@ -12,7 +12,11 @@
 module.exports = (DynamoDBClient, S3Client, SNSClient) => {
     
     //Importing Modules
-    const cloudFrontPrivate = require('../private/cloudfront_private.pem');
+    const fs = require('fs');
+    const path = require('path');
+
+    const privateKeyPath = path.join(__dirname, "../private/cloudfront_private.pem")
+    const cloudFrontPrivate = fs.readFileSync(privateKeyPath);
     const cloudFrontAccessID = require('../private/cloudfront.accessid.json').ACCESSID;
 
     //Initializing Variables

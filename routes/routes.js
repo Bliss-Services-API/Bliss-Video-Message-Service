@@ -121,7 +121,7 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
      * POST Bliss Request by Submitting A Client (Requester) Form
      * 
      */
-    router.post('/request/data', (req, res) => {
+    router.post('/request/data', async (req, res) => {
         try {
             const blissRequester = req.body.bliss_requester;
             const blissResponder = req.body.bliss_responder;
@@ -166,7 +166,7 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
      */
     router.post('/request/video', 
         blissRequestMultipart.single('bliss-request-video'),
-        (req, res) => {
+        async (req, res) => {
             try {
                 const blissRequester = req.body.bliss_requester;
                 const blissResponder = req.body.bliss_responder;
