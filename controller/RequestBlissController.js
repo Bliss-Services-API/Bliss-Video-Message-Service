@@ -114,6 +114,7 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
                         BLISS_RESPONDER: { S: blissResponder },
                         BLISS_REQUEST_DATA: {S : JSON.stringify(blissRequestData)},
                         VIDEO_EXISTS: { BOOL: false },
+                        
                         EXPIRE_TIME: { N: expireTime }
                     }
                 };

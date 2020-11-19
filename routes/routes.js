@@ -37,6 +37,7 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
         blissResponseMultipart.single('bliss_response_video'),
         async (req, res) => {
             try {
+                const blissRequestId = req.body.bliss_request_id;
                 const blissRequester = req.body.bliss_requester;
                 const blissResponder = req.body.bliss_responder;
 
@@ -52,12 +53,13 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
                 const blissVideoStream = fs.createReadStream(req.file.path);
                 const blissMIMEType = req.file.mimetype;
                 
-                const { blissId, expireTime } = responseBlissController.getBlissResponseIdandExpireTime();
+                const { blissResponseId, expireTime } = responseBlissController.getBlissResponseIdandExpireTime();
+                const { blissRequestDate, blissRequestTime } = await responseBlissController.getRequestDateandTime(blissRequestId);
 
-                await responseBlissController.uploadBlissResponseVideo(blissId, blissVideoStream, blissMIMEType);
-                await responseBlissController.transmuxBlissResponseVideo(blissId, blissVideoStream, blissMIMEType);
-                await responseBlissController.uploadBlissResponseData(blissId, blissRequester, blissResponder, expireTime);
-                await responseBlissController.sendBlissRequestNotification(blissId, blissRequester, blissResponder);
+                await responseBlissController.uploadBlissResponseVideo(blissResponseId, blissVideoStream, blissMIMEType);
+                await responseBlissController.transmuxBlissResponseVideo(blissResponseId, blissVideoStream, blissMIMEType);
+                await responseBlissController.uploadBlissResponseData(blissResponseId, blissRequestId, blissRequester, blissResponder, expireTime);
+                await responseBlissController.sendBlissResponseNotification(blissResponseId, blissRequester, blissResponder, blissRequestDate, blissRequestTime);
 
                 res.send({
                     MESSAGE: 'DONE',

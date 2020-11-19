@@ -45,6 +45,21 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
         };
     };
 
+    const getRequestDateandTime = (blissRequestId) => {
+        const normalizingTime = 880831800;
+
+        const blissRequestTimestamp = (blissRequestId + normalizingTime) * 1000;
+        const date = new Date(blissRequestTimestamp);
+
+        const blissRequestDate = date.getDate();
+        const blissRequestTime = date.getTime();
+
+        return {
+            blissRequestDate,
+            blissRequestTime
+        }
+    }
+
     /**
      * 
      * Upload Bliss Video as Response to the Bliss request, in the S3 Bucket
@@ -77,13 +92,14 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
      * @param {int} expireTime TTL for the data stored in the Database
      * 
      */
-    const uploadBlissResponseData = async (blissResponseId, blissRequester, blissResponder, expireTime) => {
+    const uploadBlissResponseData = async (blissResponseId, blissRequestId, blissRequester, blissResponder, expireTime) => {
         return new Promise((resolve, reject) => {
             try {
                 const dynamoDBPayload = {
                     TableName: blissResponseDBTableName,
                     Item: {
                         BLISS_ID: { N: blissResponseId },
+                        BLISS_REQUEST_ID: { N: blissRequestId },
                         BLISS_REQUESTER: { S: blissRequester },
                         BLISS_RESPONDER: { S: blissResponder },
                         EXPIRE_TIME: {N: expireTime}
@@ -137,12 +153,13 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
      * @param {string} blissResponder celeb_name, representing the celeb responding to a bliss request
      * 
      */
-    const sendBlissResponseNotification = async (blissResponseId, blissRequester, blissResponder) => {
+    const sendBlissResponseNotification = async (blissResponseId, blissRequester, blissResponder, blissRequestDate, blissRequestTime) => {
         const snsMessage = {
             BLISS_ID: blissResponseId,
             BLISS_REQUESTER: blissRequester,
             BLISS_RESPONDER: blissResponder,
-            Message: 'BLISS MESSAGE UPLOADED'
+            BLISS_REQUEST_DATE: blissRequestDate,
+            BLISS_REQUEST_TIME: blissRequestTime,
         };
 
         const notification = {
@@ -223,6 +240,7 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
         uploadBlissResponseData,
         uploadBlissResponseVideo,
         checkResponseVideoExists,
-        getBlissResponseDownloadURL
+        getBlissResponseDownloadURL,
+        getRequestDateandTime
     };
 }
