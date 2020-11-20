@@ -38,13 +38,13 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
         async (req, res) => {
             try {
                 const blissRequestId = req.body.bliss_request_id;
-                const blissRequester = req.body.bliss_requester;
-                const blissResponder = req.body.bliss_responder;
+                const clientId = req.body.client_id;
+                const celebName = req.body.celeb_name;
 
-                if(blissRequester === null || blissRequester === undefined)
+                if(clientId === null || clientId === undefined)
                     throw new Error('bliss_requester is undefined');
 
-                if(blissResponder === null || blissResponder === undefined)
+                if(celebName === null || celebName === undefined)
                     throw new Error('bliss_responder is undefined');
 
                 if(req.file === null || req.file === undefined) 
@@ -54,18 +54,17 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
                 const blissMIMEType = req.file.mimetype;
                 
                 const { blissResponseId, expireTime } = responseBlissController.getBlissResponseIdandExpireTime();
-                const { blissRequestDate, blissRequestTime } = await responseBlissController.getRequestDateandTime(blissRequestId);
+                const { blissRequestDate, blissRequestTime } = responseBlissController.getRequestDateandTime(blissRequestId);
 
                 await responseBlissController.uploadBlissResponseVideo(blissResponseId, blissVideoStream, blissMIMEType);
                 await responseBlissController.transmuxBlissResponseVideo(blissResponseId, blissVideoStream, blissMIMEType);
-                await responseBlissController.uploadBlissResponseData(blissResponseId, blissRequestId, blissRequester, blissResponder, expireTime);
-                await responseBlissController.sendBlissResponseNotification(blissResponseId, blissRequester, blissResponder, blissRequestDate, blissRequestTime);
+                await responseBlissController.uploadBlissResponseData(blissResponseId, blissRequestId, clientId, celebName, expireTime);
+                await responseBlissController.sendBlissResponseNotification(blissResponseId, clientId, celebName, blissRequestDate, blissRequestTime);
 
                 res.send({
                     MESSAGE: 'DONE',
                     RESPONSE: 'Bliss Sent!',
-                    CODE: 'BLISS_SENT',
-                    BLISS_ID: blissId
+                    CODE: 'BLISS_SENT'
                 });
             }
             catch(err) {
@@ -125,14 +124,15 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
      */
     router.post('/request/data', async (req, res) => {
         try {
-            const blissRequester = req.body.bliss_requester;
-            const blissResponder = req.body.bliss_responder;
+            const clientId = req.body.clien_id;
+            const celebName = req.body.celeb_name;
             const blissRequestData = req.body.bliss_request_data;
+            const clientName = req.body.client_name;
 
-            if(blissRequester === null || blissRequester === undefined)
+            if(clientId === null || clientId === undefined)
                 throw new Error('bliss_requester is undefined');
 
-            if(blissResponder === null || blissResponder === undefined)
+            if(celebName === null || celebName === undefined)
                 throw new Error('bliss_responder is undefined');
 
             if(blissRequestData === null || blissRequestData === undefined)
@@ -140,8 +140,8 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
 
             const { blissRequestId, expireTime } = requestBlissController.getBlissRequestIdandExpireTime();
 
-            await requestBlissController.uploadBlissRequestData(blissRequestId, blissRequester, blissResponder, blissRequestData, expireTime);
-            await requestBlissController.sendBlissRequestNotification(blissRequestId, blissRequester, blissResponder);
+            await requestBlissController.uploadBlissRequestData(blissRequestId, clientId, celebName, blissRequestData, expireTime);
+            await requestBlissController.sendBlissRequestNotification(blissRequestId, clientId, celebName);
 
             res.send({
                 MESSAGE: 'DONE',
@@ -170,13 +170,13 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
         blissRequestMultipart.single('bliss-request-video'),
         async (req, res) => {
             try {
-                const blissRequester = req.body.bliss_requester;
-                const blissResponder = req.body.bliss_responder;
+                const clientId = req.body.bliss_requester;
+                const celebName = req.body.bliss_responder;
 
-                if(blissRequester === null || blissRequester === undefined)
+                if(clientId === null || clientId === undefined)
                     throw new Error('bliss_requester is undefined');
 
-                if(blissResponder === null || blissResponder === undefined)
+                if(celebName === null || celebName === undefined)
                     throw new Error('bliss_responder is undefined');
 
                 if(req.file === null || req.file === undefined) 
@@ -188,8 +188,8 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
                 const { blissRequestId, expireTime } = requestBlissController.getBlissRequestIdandExpireTime();
 
                 await requestBlissController.uploadBlissRequestVideo(blissRequestId, blissRequestVideoStream, blissRequestMIMEType);
-                await requestBlissController.uploadBlissRequestData(blissRequestId, blissRequester, blissResponder, expireTime);
-                await requestBlissController.sendBlissRequestNotification(blissRequestId, blissRequester, blissResponder);
+                await requestBlissController.uploadBlissRequestData(blissRequestId, clientId, celebName, expireTime);
+                await requestBlissController.sendBlissRequestNotification(blissRequestId, clientId, celebName);
  
                 res.send({
                     MESSAGE: 'DONE',
@@ -280,6 +280,32 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
             })
         };
     });
+
+    router.get('/request/cancel', async (req, res) => {
+        try {
+            const blissRequestId = req.body.bliss_request_id;
+
+            if(blissRequestId === null || blissRequestId === undefined)
+                throw new Error('bliss_request_id param is not defined');
+
+            await requestBlissController.cancelBlissRequest(blissRequestId);
+
+            res.send({
+                MESSAGE: 'DONE',
+                RESPONSE: 'Bliss Request Deleted!',
+                CODE: 'BLISS_REQ_DELETED'
+            });
+        }
+        catch(err) {
+            console.error(chalk.error(`ERR: ${err.message}`));
+
+            res.send({
+                ERR: err.message,
+                RESPONSE: 'Bliss Request Delete Failed!',
+                CODE: 'BLISS_REQ_DELETE_FAILED'
+            })
+        };
+    })
 
     return router;
 }

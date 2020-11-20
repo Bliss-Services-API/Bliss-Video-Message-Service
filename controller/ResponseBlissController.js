@@ -23,7 +23,7 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
     const blissResponseBucket = process.env.BLISS_RESPONSE_BUCKET;
     const blissResponseOutputBucket = process.env.BLISS_RESPONSE_OUTPUT_BUCKET;
     const blissResponseSNS = process.env.BLISS_RESPONSE_SNS_ARN;
-    const blissResponseDBTableName = process.env.BLISS_RESPONSE_DB_TABLE;
+    const blissRequestCancelSNS = process.env.BLISS_REQUEST_CANCEL_SNS_ARN;
     const blissResponseCDNUrl = process.env.BLISS_RESPONSE_CDN_URL;
     
 
@@ -84,43 +84,6 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
 
     /**
      * 
-     * Upload Bliss Response as Response to the Bliss request, in the S3 Bucket
-     * 
-     * @param {number} blissResponseId Bliss Response Id
-     * @param {string} blissRequester client_id, representing the client requesting for a bliss
-     * @param {string} blissResponder celeb_name, representing the celeb responding to a bliss request
-     * @param {int} expireTime TTL for the data stored in the Database
-     * 
-     */
-    const uploadBlissResponseData = async (blissResponseId, blissRequestId, blissRequester, blissResponder, expireTime) => {
-        return new Promise((resolve, reject) => {
-            try {
-                const dynamoDBPayload = {
-                    TableName: blissResponseDBTableName,
-                    Item: {
-                        BLISS_ID: { N: blissResponseId },
-                        BLISS_REQUEST_ID: { N: blissRequestId },
-                        BLISS_REQUESTER: { S: blissRequester },
-                        BLISS_RESPONDER: { S: blissResponder },
-                        EXPIRE_TIME: {N: expireTime}
-                    }
-                };
-
-                DynamoDBClient.putItem(dynamoDBPayload, (err, data) => {
-                    if(err) 
-                        return reject(err);
-                    else
-                        return resolve(blissResponseId);
-                })
-            }
-            catch(err) {
-                return reject(err);
-            }
-        })
-    }
-
-    /**
-     * 
      * Get Bliss Response from the Celeb (Responder) with the blissResponseId Attribute
      * 
      * @param {number} blissResponseId Bliss Response Id
@@ -140,7 +103,7 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
         });
 
         return {signedUrl, expireTime};
-    }
+    };
 
     /**
      * 
@@ -149,15 +112,15 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
      * App using Firebase Cloud Messaging.
      * 
      * @param {number} blissResponseId Bliss Response Id
-     * @param {string} blissRequester client_id, representing the client requesting for a bliss
-     * @param {string} blissResponder celeb_name, representing the celeb responding to a bliss request
+     * @param {string} clientId client_id, representing the client requesting for a bliss
+     * @param {string} celebName celeb_name, representing the celeb responding to a bliss request
      * 
      */
-    const sendBlissResponseNotification = async (blissResponseId, blissRequester, blissResponder, blissRequestDate, blissRequestTime) => {
+    const sendBlissResponseNotification = async (blissResponseId, clientId, celebName, blissRequestDate, blissRequestTime) => {
         const snsMessage = {
-            BLISS_ID: blissResponseId,
-            BLISS_REQUESTER: blissRequester,
-            BLISS_RESPONDER: blissResponder,
+            BLISS_RESPONSE_ID: blissResponseId,
+            CLIENT_ID: clientId,
+            CELEB_NAME: celebName,
             BLISS_REQUEST_DATE: blissRequestDate,
             BLISS_REQUEST_TIME: blissRequestTime,
         };
@@ -178,7 +141,34 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
                 console.error(chalk.error(`ERR: ${err.message}`));
                 return [err, false];
             })
-    }
+    };
+
+    const sendBlissCancelNotification =  async (blissResponseId, clientId, celebName, blissRequestDate, blissRequestTime) => {
+        const snsMessage = {
+            BLISS_RESPONSE_ID: blissResponseId,
+            CLIENT_ID: clientId,
+            CELEB_NAME: celebName,
+            BLISS_REQUEST_DATE: blissRequestDate,
+            BLISS_REQUEST_TIME: blissRequestTime
+        };
+
+        const notification = {
+            Message: JSON.stringify(snsMessage),
+            TopicArn: blissRequestCancelSNS
+        };
+
+        const snsClientPromise = SNSClient.publish(notification).promise();
+        
+        return snsClientPromise
+            .then((data) => {
+                console.log(chalk.success(`Bliss Request Canceled Successfully. Message ID: ${data.MessageId}`));
+                return [null, true];
+            })
+            .catch((err) => {
+                console.error(chalk.error(`ERR: ${err.message}`));
+                return [err, false];
+            })
+    };
 
     /**
      * 
@@ -237,10 +227,10 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
         getBlissResponseIdandExpireTime,
         sendBlissResponseNotification,
         transmuxBlissResponseVideo,
-        uploadBlissResponseData,
         uploadBlissResponseVideo,
         checkResponseVideoExists,
         getBlissResponseDownloadURL,
-        getRequestDateandTime
+        getRequestDateandTime,
+        sendBlissCancelNotification
     };
 }

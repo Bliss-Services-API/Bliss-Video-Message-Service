@@ -57,69 +57,31 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
 
     /**
      * 
-     * Upload Bliss Request Data for the Video Uploaded in the DynamoDB
-     * 
-     * @param {number} blissResponseId Bliss Response Id
-     * @param {string} blissRequester client_id, representing the client requesting for a bliss
-     * @param {string} blissResponder celeb_name, representing the celeb responding to a bliss request
-     * @param {int} expireTime TTL for the data stored in the Database
-     * 
-     */
-    const uploadBlissVideoRequestData = async (blissRequestId, blissRequester, blissResponder, expireTime) => {
-        return new Promise((resolve, reject) => {
-            try {
-                const dynamoDBPayload = {
-                    TableName: blissRequestDBTableName,
-                    Item: {
-                        BLISS_ID: { N: blissRequestId },
-                        BLISS_REQUESTER: { S: blissRequester },
-                        BLISS_RESPONDER: { S: blissResponder },
-                        VIDEO_EXISTS: { BOOL: true },
-                        EXPIRE_TIME: { N: expireTime }
-                    }
-                };
-
-                DynamoDBClient.putItem(dynamoDBPayload, (err, data) => {
-                    if(err) 
-                        return reject(err);
-                    else
-                        return resolve(blissRequestId);
-                })
-            }
-            catch(err) {
-                return reject(err);
-            }
-        })
-    };
-
-    /**
-     * 
      * Upload Bliss Request Data in the DynamoDB
      * 
      * @param {number} blissResponseId Bliss Response Id
-     * @param {string} blissRequester client_id, representing the client requesting for a bliss
-     * @param {string} blissResponder celeb_name, representing the celeb responding to a bliss request
+     * @param {string} clientId client_id, representing the client requesting for a bliss
+     * @param {string} celebName celeb_name, representing the celeb responding to a bliss request
      * @param {json} blissRequestData JSON of Data to upload in the database as the Bliss Request
      * @param {int} expireTime TTL for the data stored in the Database
      * 
      */
-    const uploadBlissRequestData = async (blissRequestId, blissRequester, blissResponder, blissRequestData = 'NA', expireTime) => {
+    const uploadBlissRequestData = async (blissRequestId, clientId, celebName, blissVideoUploaded = false, blissRequestData = 'NA', expireTime) => {
         return new Promise((resolve, reject) => {
             try {
-                const dynamoDBPayload = {
+                const blissRequestPayload = {
                     TableName: blissRequestDBTableName,
                     Item: {
-                        BLISS_ID: { N: blissRequestId },
-                        BLISS_REQUESTER: { S: blissRequester },
-                        BLISS_RESPONDER: { S: blissResponder },
+                        BLISS_REQUEST_ID: { N: blissRequestId },
+                        CLIENT_ID: { S: clientId },
+                        CELEB_NAME: { S: celebName },
                         BLISS_REQUEST_DATA: {S : JSON.stringify(blissRequestData)},
-                        VIDEO_EXISTS: { BOOL: false },
-                        
+                        VIDEO_EXISTS: { BOOL: blissVideoUploaded },                        
                         EXPIRE_TIME: { N: expireTime }
                     }
                 };
 
-                DynamoDBClient.putItem(dynamoDBPayload, (err, data) => {
+                DynamoDBClient.putItem(blissRequestPayload, (err, data) => {
                     if(err) 
                         return reject(err);
                     else
@@ -139,16 +101,15 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
      * App using Firebase Cloud Messaging.
      * 
      * @param {number} blissResponseId Bliss Response Id
-     * @param {string} blissRequester client_id, representing the client requesting for a bliss
-     * @param {string} blissResponder celeb_name, representing the celeb responding to a bliss request
+     * @param {string} clientId client_id, representing the client requesting for a bliss
+     * @param {string} celebName celeb_name, representing the celeb responding to a bliss request
      * 
      */
-    const sendBlissRequestNotification = async (blissRequestId, blissRequester, blissResponder) => {
+    const sendBlissRequestNotification = (blissRequestId, celebName) => {
         const snsMessage = {
-            BlissId: blissRequestId,
-            blissRequester: blissRequester,
-            blissResponder: blissResponder,
-            Message: 'BLISS_REQUEST_RECEIVED'
+            BLISS_REQUEST_ID: blissRequestId,
+            CELEB_NAME: celebName,
+            CLIENT_NAME: clientName
         };
 
         const notification = {
@@ -198,12 +159,12 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
     const getBlissRequestData = async (blissRequestId) => {
         return new Promise((resolve, reject) => {
             try {
-                var dataParam = {
+                const dataParam = {
                     TableName: 'TABLE',
                     Key: {
                         'BLISS_ID': { N: blissRequestId }
                     },
-                    ProjectionExpression: 'BLISS_REQUESTER'
+                    ProjectionExpression: 'CLIENT_ID'
                 };
 
                 DynamoDBClient.getItem(dataParam, function(err, data) {
@@ -217,7 +178,7 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
             catch(err) {
                 return reject(err);
             }
-        })
+        });
     };
 
     /**
@@ -250,14 +211,38 @@ module.exports = (DynamoDBClient, S3Client, SNSClient) => {
         })
     };
 
+    const cancelBlissRequest = async (blissRequestId) => {
+        return new Promise((resolve, reject) => {
+            try {
+                const dataParam = {
+                    TableName: blissRequestDBTableName,
+                    Key:{
+                        'BLISS_REQUEST_ID': blissRequestId
+                    }
+                };
+
+                DynamoDBClient.delete(dataParam, function(err, data) {
+                    if (err) {
+                        return reject(err);
+                    } else {
+                        return resolve(data);
+                    }
+                });
+            }
+            catch(err) {
+                return reject(err);
+            }
+        });
+    }
+
     return {
         getBlissRequestIdandExpireTime,
         sendBlissRequestNotification,
-        uploadBlissVideoRequestData,
         uploadBlissVideoRequest,
         getBlissRequestVideoDownloadURL,
         getBlissRequestData,
         uploadBlissRequestData,
-        checkRequestVideoExists
+        checkRequestVideoExists,
+        cancelBlissRequest
     };
 }
